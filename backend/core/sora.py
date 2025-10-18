@@ -4,6 +4,8 @@ import logging
 import json
 import io
 from typing import List
+import os
+from openai import OpenAI
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +20,11 @@ class Sora:
         self.api_version = api_version
         self.base_url = f"https://{self.resource_name}.openai.azure.com/openai/v1/video"
 
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=f"https://{self.resource_name}.openai.azure.com/openai/v1/",
+        )
+
         self.headers = {
             "api-key": self.api_key,
             "Content-Type": "application/json"
@@ -26,20 +33,28 @@ class Sora:
             f"Initialized Sora client with resource: {resource_name}, deployment: {deployment_name}")
 
     def create_video_generation_job(self, prompt, n_seconds, height, width, n_variants=1):
-        url = f"{self.base_url}/generations/jobs?api-version={self.api_version}"
-        payload = {
-            "model": self.deployment_name,
-            "prompt": prompt,
-            "n_seconds": n_seconds,
-            "height": height,
-            "width": width,
-            "n_variants": n_variants
-        }
+
+        video = self.client.videos.create(
+            model=self.deployment_name,
+            size="1280x720",
+            seconds="12",
+            prompt=prompt,
+        )
+
         logger.info(
             f"Creating video generation job with prompt: {prompt[:50]}...")
-        response = requests.post(url, json=payload, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
+
+        print(video.to_json())
+
+        response = video.to_dict()
+
+        response["prompt"] = prompt
+        response["n_variants"] = n_variants
+        response["n_seconds"] = n_seconds
+        response["height"] = height
+        response["width"] = width
+
+        return response
 
     def create_video_generation_job_with_images(self, prompt, images, image_filenames, n_seconds, height, width, n_variants=1):
         """Create video generation job with image inpainting using multipart upload.
@@ -47,13 +62,14 @@ class Sora:
         If the API rejects the request, retries once including full-image crop bounds.
         """
         url = f"{self.base_url}/generations/jobs?api-version={self.api_version}"
-        
+
         def build_files():
             return [("files", (filename, io.BytesIO(image_content), "image/jpeg"))
                     for image_content, filename in zip(images, image_filenames)]
 
         # Remove Content-Type from headers for multipart request
-        multipart_headers = {k: v for k, v in self.headers.items() if k.lower() != "content-type"}
+        multipart_headers = {
+            k: v for k, v in self.headers.items() if k.lower() != "content-type"}
 
         # Common form fields
         base_data = {
@@ -77,7 +93,8 @@ class Sora:
             ])
         }
 
-        logger.info(f"Creating video job (no crop bounds) with {len(images)} images and prompt: {prompt[:50]}...")
+        logger.info(
+            f"Creating video job (no crop bounds) with {len(images)} images and prompt: {prompt[:50]}...")
         response = requests.post(
             url,
             headers=multipart_headers,
@@ -117,17 +134,29 @@ class Sora:
         )
 
         if not response2.ok:
-            logger.error(f"SORA API error (with crop bounds): {response2.status_code} {response2.text}")
+            logger.error(
+                f"SORA API error (with crop bounds): {response2.status_code} {response2.text}")
             response2.raise_for_status()
 
         return response2.json()
 
     def get_video_generation_job(self, job_id):
-        url = f"{self.base_url}/generations/jobs/{job_id}?api-version={self.api_version}"
+
+        # url = f"{self.base_url}/generations/jobs/{job_id}?api-version={self.api_version}"
         logger.info(f"Getting video generation job: {job_id}")
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
+        response = self.client.videos.retrieve(job_id)
+
+        print(response.to_json())
+
+        response = response.to_dict()
+
+        response["prompt"] = ""
+        response["n_variants"] = 0
+        response["n_seconds"] = 0
+        response["height"] = 0
+        response["width"] = 0
+
+        return response
 
     def delete_video_generation_job(self, job_id):
         url = f"{self.base_url}/generations/jobs/{job_id}?api-version={self.api_version}"

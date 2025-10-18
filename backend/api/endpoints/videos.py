@@ -110,7 +110,7 @@ async def create_video_generation_job(
         # Process images if provided
         processed_images = []
         image_filenames = []
-        
+
         if images:
             for idx, image_file in enumerate(images):
                 # Read image content
@@ -118,15 +118,18 @@ async def create_video_generation_job(
 
                 # Validate file size (25MB limit)
                 if len(image_content) > 25 * 1024 * 1024:
-                    raise HTTPException(400, f"Image {idx+1} exceeds 25MB limit")
+                    raise HTTPException(
+                        400, f"Image {idx+1} exceeds 25MB limit")
 
                 # Validate file type
                 if not image_file.content_type or not image_file.content_type.startswith('image/'):
-                    raise HTTPException(400, f"File {idx+1} is not a valid image")
+                    raise HTTPException(
+                        400, f"File {idx+1} is not a valid image")
 
                 processed_images.append(image_content)
-                image_filenames.append(image_file.filename or f"image_{idx+1}.jpg")
-        
+                image_filenames.append(
+                    image_file.filename or f"image_{idx+1}.jpg")
+
         # Create job using appropriate method
         if processed_images:
             # Use image+text method
@@ -148,7 +151,7 @@ async def create_video_generation_job(
                 width=width,
                 n_variants=n_variants
             )
-        
+
         # Create response with enhanced metadata
         response_data = {
             **job,
@@ -158,9 +161,9 @@ async def create_video_generation_job(
             "folder_path": folder_path,
             "analyze_video": analyze_video
         }
-        
+
         return VideoGenerationJobResponse(**response_data)
-        
+
     except Exception as e:
         logger.error(f"Error creating video job: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -264,11 +267,14 @@ async def create_video_generation_with_analysis_upload(
     from backend.core.azure_storage import AzureBlobStorageService
 
     try:
-        logger.info(f"Cosmos DB service available: {cosmos_service is not None}")
+        logger.info(
+            f"Cosmos DB service available: {cosmos_service is not None}")
         if sora_client is None:
-            raise HTTPException(status_code=503, detail="Video generation service is currently unavailable.")
+            raise HTTPException(
+                status_code=503, detail="Video generation service is currently unavailable.")
         if analyze_video and llm_client is None:
-            raise HTTPException(status_code=503, detail="LLM service is currently unavailable for video analysis.")
+            raise HTTPException(
+                status_code=503, detail="LLM service is currently unavailable for video analysis.")
 
         # Parse optional metadata JSON for folder or other decorations
         metadata_dict = None
@@ -279,7 +285,8 @@ async def create_video_generation_with_analysis_upload(
                 metadata_dict = None
 
         # Prefer explicit folder_path; fallback to metadata.folder
-        selected_folder = folder_path or (metadata_dict.get("folder") if metadata_dict else "")
+        selected_folder = folder_path or (
+            metadata_dict.get("folder") if metadata_dict else "")
 
         # Prepare optional images
         processed_images: List[bytes] = []
@@ -288,11 +295,14 @@ async def create_video_generation_with_analysis_upload(
             for idx, image_file in enumerate(images):
                 content = await image_file.read()
                 if len(content) > 25 * 1024 * 1024:
-                    raise HTTPException(400, f"Image {idx+1} exceeds 25MB limit")
+                    raise HTTPException(
+                        400, f"Image {idx+1} exceeds 25MB limit")
                 if not image_file.content_type or not image_file.content_type.startswith("image/"):
-                    raise HTTPException(400, f"File {idx+1} is not a valid image")
+                    raise HTTPException(
+                        400, f"File {idx+1} is not a valid image")
                 processed_images.append(content)
-                image_filenames.append(image_file.filename or f"image_{idx+1}.jpg")
+                image_filenames.append(
+                    image_file.filename or f"image_{idx+1}.jpg")
 
         # Create job with or without images
         if processed_images:
@@ -315,7 +325,8 @@ async def create_video_generation_with_analysis_upload(
             )
 
         job_response = VideoGenerationJobResponse(**job)
-        logger.info(f"Created job {job_response.id}, waiting for completion...")
+        logger.info(
+            f"Created job {job_response.id}, waiting for completion...")
 
         # Poll job until completion
         max_wait_time = 300
@@ -328,12 +339,14 @@ async def create_video_generation_with_analysis_upload(
                 logger.info(f"Job {job_response.id} completed successfully")
                 break
             if job_response.status == "failed":
-                raise HTTPException(status_code=500, detail=f"Video generation failed: {job_response.failure_reason}")
+                raise HTTPException(
+                    status_code=500, detail=f"Video generation failed: {job_response.failure_reason}")
             time.sleep(poll_interval)
             elapsed_time += poll_interval
 
         if job_response.status != "succeeded":
-            raise HTTPException(status_code=408, detail="Video generation timed out. Please try again.")
+            raise HTTPException(
+                status_code=408, detail="Video generation timed out. Please try again.")
 
         analysis_results = None
         if analyze_video and job_response.generations:
@@ -355,8 +368,10 @@ async def create_video_generation_with_analysis_upload(
                     # Extract frames and analyze
                     video_extractor = VideoExtractor(downloaded_path)
                     frames = video_extractor.extract_video_frames(interval=2)
-                    video_analyzer = VideoAnalyzer(llm_client, settings.LLM_DEPLOYMENT)
-                    insights = video_analyzer.video_chat(frames, system_message=analyze_video_system_message)
+                    video_analyzer = VideoAnalyzer(
+                        llm_client, settings.LLM_DEPLOYMENT)
+                    insights = video_analyzer.video_chat(
+                        frames, system_message=analyze_video_system_message)
 
                     analysis_result = VideoAnalyzeResponse(
                         summary=insights.get("summary", ""),
@@ -368,15 +383,19 @@ async def create_video_generation_with_analysis_upload(
 
                     # Upload to gallery with metadata
                     azure_service = AzureBlobStorageService()
-                    base_filename = generation.get("filename") or f"{re.sub(r'[^a-zA-Z0-9_\-]', '_', prompt.strip()[:50])}_{generation_id}.mp4"
+                    base_filename = generation.get(
+                        "filename") or f"{re.sub(r'[^a-zA-Z0-9_\-]', '_', prompt.strip()[:50])}_{generation_id}.mp4"
                     final_filename = base_filename
                     normalized_folder = ""
                     if selected_folder and selected_folder != "root":
-                        normalized_folder = azure_service.normalize_folder_path(selected_folder)
+                        normalized_folder = azure_service.normalize_folder_path(
+                            selected_folder)
                         final_filename = f"{normalized_folder}{base_filename}"
 
-                    container_client = azure_service.blob_service_client.get_container_client("videos")
-                    blob_client = container_client.get_blob_client(final_filename)
+                    container_client = azure_service.blob_service_client.get_container_client(
+                        "videos")
+                    blob_client = container_client.get_blob_client(
+                        final_filename)
 
                     # Build upload metadata
                     analysis_data = {
@@ -399,12 +418,14 @@ async def create_video_generation_with_analysis_upload(
                     processed_metadata = {}
                     for k, v in upload_metadata.items():
                         if v is not None:
-                            processed_metadata[k] = azure_service._preprocess_metadata_value(str(v))
+                            processed_metadata[k] = azure_service._preprocess_metadata_value(
+                                str(v))
 
                     with open(downloaded_path, "rb") as video_file:
                         blob_client.upload_blob(
                             data=video_file,
-                            content_settings=ContentSettings(content_type="video/mp4"),
+                            content_settings=ContentSettings(
+                                content_type="video/mp4"),
                             metadata=processed_metadata,
                             overwrite=True,
                         )
@@ -414,7 +435,8 @@ async def create_video_generation_with_analysis_upload(
                     # Create Cosmos DB metadata record if available
                     if cosmos_service:
                         try:
-                            asset_id = final_filename.split(".")[0].split("/")[-1]
+                            asset_id = final_filename.split(
+                                ".")[0].split("/")[-1]
                             video_info = os.stat(downloaded_path)
                             cosmos_metadata = {
                                 "id": asset_id,
@@ -439,9 +461,11 @@ async def create_video_generation_with_analysis_upload(
                                     "job_id": job_response.id,
                                 },
                             }
-                            cosmos_service.create_asset_metadata(cosmos_metadata)
+                            cosmos_service.create_asset_metadata(
+                                cosmos_metadata)
                         except Exception as cosmos_error:
-                            logger.error(f"Failed to create Cosmos DB metadata: {cosmos_error}")
+                            logger.error(
+                                f"Failed to create Cosmos DB metadata: {cosmos_error}")
 
                 finally:
                     try:
@@ -458,7 +482,8 @@ async def create_video_generation_with_analysis_upload(
             upload_results=None,
         )
     except Exception as e:
-        logger.error(f"Error in unified upload endpoint: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error in unified upload endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -478,12 +503,14 @@ def create_video_generation_with_analysis(
 
     try:
         # Log service availability for debugging
-        logger.info(f"Cosmos DB service available: {cosmos_service is not None}")
+        logger.info(
+            f"Cosmos DB service available: {cosmos_service is not None}")
         logger.info(f"Cosmos DB config - Endpoint: {settings.AZURE_COSMOS_DB_ENDPOINT is not None}, "
-                   f"Use Managed Identity: {settings.USE_MANAGED_IDENTITY}, "
-                   f"Has Key: {settings.AZURE_COSMOS_DB_KEY is not None}")
+                    f"Use Managed Identity: {settings.USE_MANAGED_IDENTITY}, "
+                    f"Has Key: {settings.AZURE_COSMOS_DB_KEY is not None}")
         if cosmos_service:
-            logger.info("Cosmos DB service initialized successfully for video generation")
+            logger.info(
+                "Cosmos DB service initialized successfully for video generation")
         # Ensure required clients are available
         if sora_client is None:
             raise HTTPException(
@@ -508,7 +535,8 @@ def create_video_generation_with_analysis(
         )
 
         job_response = VideoGenerationJobResponse(**job)
-        logger.info(f"Created job {job_response.id}, waiting for completion...")
+        logger.info(
+            f"Created job {job_response.id}, waiting for completion...")
 
         # Step 2: Poll for job completion
         max_wait_time = 300  # 5 minutes max wait
@@ -549,7 +577,8 @@ def create_video_generation_with_analysis(
                 try:
                     generation_id = generation.get("id")
                     if not generation_id:
-                        logger.warning("Generation missing ID, skipping analysis")
+                        logger.warning(
+                            "Generation missing ID, skipping analysis")
                         continue
 
                     logger.info(
@@ -577,7 +606,8 @@ def create_video_generation_with_analysis(
 
                         # Extract frames and analyze
                         video_extractor = VideoExtractor(downloaded_path)
-                        frames = video_extractor.extract_video_frames(interval=2)
+                        frames = video_extractor.extract_video_frames(
+                            interval=2)
 
                         video_analyzer = VideoAnalyzer(
                             llm_client, settings.LLM_DEPLOYMENT
@@ -631,7 +661,8 @@ def create_video_generation_with_analysis(
 
                             # Extract folder path from request metadata and normalize it
                             folder_path = (
-                                req.metadata.get("folder") if req.metadata else None
+                                req.metadata.get(
+                                    "folder") if req.metadata else None
                             )
                             final_filename = base_filename
 
@@ -644,7 +675,8 @@ def create_video_generation_with_analysis(
                                     f"Uploading video to folder: {normalized_folder}"
                                 )
                             else:
-                                logger.info("Uploading video to root directory")
+                                logger.info(
+                                    "Uploading video to root directory")
 
                             # Upload to Azure Blob Storage
                             container_client = (
@@ -664,7 +696,7 @@ def create_video_generation_with_analysis(
                                 "feedback": analysis_result.feedback,
                                 "analyzed_at": datetime.now().isoformat(),
                             }
-                            
+
                             upload_metadata = {
                                 "generation_id": generation_id,
                                 "prompt": req.prompt,
@@ -675,7 +707,8 @@ def create_video_generation_with_analysis(
 
                             if folder_path and folder_path != "root":
                                 upload_metadata["folder_path"] = (
-                                    azure_service.normalize_folder_path(folder_path)
+                                    azure_service.normalize_folder_path(
+                                        folder_path)
                                 )
 
                             # Preprocess metadata values for Azure compatibility
@@ -683,7 +716,8 @@ def create_video_generation_with_analysis(
                             for k, v in upload_metadata.items():
                                 if v is not None:
                                     processed_metadata[k] = (
-                                        azure_service._preprocess_metadata_value(str(v))
+                                        azure_service._preprocess_metadata_value(
+                                            str(v))
                                     )
 
                             # Read the file and upload with metadata
@@ -698,7 +732,8 @@ def create_video_generation_with_analysis(
                                 )
 
                             blob_url = blob_client.url
-                            logger.info(f"Uploaded video to gallery: {blob_url}")
+                            logger.info(
+                                f"Uploaded video to gallery: {blob_url}")
 
                             # Create metadata record in Cosmos DB if available
                             if cosmos_service:
@@ -744,7 +779,8 @@ def create_video_generation_with_analysis(
                                         },
                                     }
 
-                                    logger.info(f"Attempting to create Cosmos DB metadata for video: {asset_id}")
+                                    logger.info(
+                                        f"Attempting to create Cosmos DB metadata for video: {asset_id}")
                                     cosmos_service.create_asset_metadata(
                                         cosmos_metadata
                                     )
@@ -756,9 +792,11 @@ def create_video_generation_with_analysis(
                                         f"Failed to create Cosmos DB metadata for video {asset_id}: {cosmos_error}"
                                     )
                                     import traceback
-                                    logger.error(f"Cosmos DB error traceback: {traceback.format_exc()}")
+                                    logger.error(
+                                        f"Cosmos DB error traceback: {traceback.format_exc()}")
                             else:
-                                logger.warning(f"Cosmos DB service not available - skipping metadata creation for video {generation_id}")
+                                logger.warning(
+                                    f"Cosmos DB service not available - skipping metadata creation for video {generation_id}")
 
                         except Exception as upload_error:
                             logger.warning(
@@ -843,7 +881,8 @@ def download_generation_content(
 
         # Verify the file was downloaded successfully
         if not os.path.isfile(file_path):
-            raise FileNotFoundError(f"Downloaded file not found at {file_path}")
+            raise FileNotFoundError(
+                f"Downloaded file not found at {file_path}")
 
         logger.info(f"Successfully downloaded file. Returning: {file_path}")
 
@@ -985,7 +1024,8 @@ def enhance_video_prompt(req: VideoPromptEnhancementRequest):
             model=settings.LLM_DEPLOYMENT,
             response_format={"type": "json_object"},
         )
-        enhanced_prompt = json.loads(response.choices[0].message.content).get("prompt")
+        enhanced_prompt = json.loads(
+            response.choices[0].message.content).get("prompt")
         return VideoPromptEnhancementResponse(enhanced_prompt=enhanced_prompt)
 
     except Exception as e:
@@ -1017,7 +1057,8 @@ def generate_video_filename(req: VideoFilenameGenerateRequest):
 
         # Validate prompt
         if not req.prompt or not req.prompt.strip():
-            raise HTTPException(status_code=400, detail="Prompt must not be empty.")
+            raise HTTPException(
+                status_code=400, detail="Prompt must not be empty.")
 
         # Call the LLM to enhance the prompt
         messages = [
